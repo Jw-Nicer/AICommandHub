@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Colors — Actions */
+  --color-approve: #10B981;
+  --color-reject: #EF4444;
+  --color-modify: #3B82F6;
+
+  /* Colors — Risk Levels */
+  --color-risk-low: #10B981;
+  --color-risk-medium: #F59E0B;
+  --color-risk-high: #F97316;
+  --color-risk-critical: #EF4444;
+
+  /* Colors — Backgrounds */
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #F9FAFB;
+
+  /* Colors — Text */
+  --color-text-primary: #111827;
+  --color-text-secondary: #6B7280;
+
+  /* Typography */
+  --font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-size-title: 18px;
+  --font-size-body: 16px;
+  --font-size-caption: 14px;
+  --font-size-badge: 12px;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* Card */
+  --card-border-radius: 12px;
+  --card-padding: 16px;
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+
+  /* Animation */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --swipe-threshold: 100px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg-primary: #111827;
+    --color-bg-secondary: #1F2937;
+    --color-text-primary: #F9FAFB;
+    --color-text-secondary: #9CA3AF;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+}
+
+body {
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  font-family: var(--font-family);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure content doesn't hide behind the bottom nav */
+main {
+  padding-bottom: 80px;
+}

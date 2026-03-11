@@ -1,0 +1,149 @@
+/* POCP ChatGPT Bridge Styles */
+
+.pocp-bridge-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #3B82F6;
+  background: transparent;
+  border: 1px solid #3B82F6;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+
+.pocp-bridge-btn:hover {
+  background: #3B82F6;
+  color: white;
+}
+
+/* Modal */
+.pocp-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999999;
+}
+
+.pocp-modal-content {
+  background: #1F2937;
+  border-radius: 12px;
+  padding: 24px;
+  width: 400px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.pocp-modal-title {
+  color: #F9FAFB;
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 16px 0;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+
+.pocp-label {
+  display: block;
+  color: #9CA3AF;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 12px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+
+.pocp-input {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #F9FAFB;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  outline: none;
+  box-sizing: border-box;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+
+.pocp-input:focus {
+  border-color: #3B82F6;
+}
+
+.pocp-preview {
+  margin: 12px 0;
+  padding: 8px 12px;
+  background: #111827;
+  border-radius: 8px;
+  color: #6B7280;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  max-height: 100px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.pocp-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.pocp-btn {
+  flex: 1;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: -apple-system, system-ui, sans-serif;
+  transition: opacity 0.15s;
+}
+
+.pocp-btn:hover {
+  opacity: 0.9;
+}
+
+.pocp-btn-cancel {
+  background: #374151;
+  color: #D1D5DB;
+}
+
+.pocp-btn-submit {
+  background: #3B82F6;
+  color: white;
+}
+
+.pocp-status {
+  margin-top: 12px;
+  font-size: 13px;
+  text-align: center;
+  color: #9CA3AF;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+
+.pocp-status-success {
+  color: #10B981;
+}
+
+.pocp-status-error {
+  color: #EF4444;
+}
+
+#pocp-bridge-modal {
+  display: none;
+}

@@ -1,6 +1,7 @@
 # Connector-Specs.md — Surface Connector Implementation Guide
 
-**Version:** 1.0
+**Version:** 2.0
+**Platform:** Firebase / Google Cloud
 **Author:** Johnwil
 **Date:** 2026-03-10
 **Parent Documents:** [Claude.md](./Claude.md) · [Agent.md](./Agent.md) · [API-Spec.md](./API-Spec.md)
@@ -9,7 +10,7 @@
 
 ## 1. Overview
 
-Each execution surface needs a **connector** — a piece of code that bridges the surface to the Supabase orchestration layer. This document provides the full implementation specification for all six connectors, including architecture, code structure, configuration, and testing requirements.
+Each execution surface needs a **connector** — a piece of code that bridges the surface to the Firebase orchestration layer. This document provides the full implementation specification for all six connectors, including architecture, code structure, configuration, and testing requirements.
 
 Every connector must implement four core behaviors:
 
@@ -22,7 +23,7 @@ Every connector must implement four core behaviors:
 
 ## 2. Shared Connector SDK
 
-All connectors share a common TypeScript/JavaScript SDK that handles authentication, HTTP calls, and Realtime subscriptions. Surface-specific connectors extend this base.
+All connectors share a common TypeScript/JavaScript SDK that handles authentication, HTTP calls, and Firestore snapshot subscriptions. Surface-specific connectors extend this base.
 
 ### 2.1 SDK Structure
 
@@ -30,7 +31,7 @@ All connectors share a common TypeScript/JavaScript SDK that handles authenticat
 pocp-connector-sdk/
 ├── src/
 │   ├── index.ts                 (main export)
-│   ├── client.ts                (Supabase client wrapper)
+│   ├── client.ts                (Firebase client wrapper)
 │   ├── approval.ts              (submit, poll, listen for decisions)
 │   ├── memory.ts                (read, write, conflict check)
 │   ├── heartbeat.ts             (60s interval ping)
@@ -47,34 +48,34 @@ pocp-connector-sdk/
 // types.ts
 
 export interface ApprovalRequest {
-  agent_name: string;
+  agentName: string;
   title: string;
   description?: string;
-  diff_payload: DiffPayload;
-  risk_level: 'low' | 'medium' | 'high' | 'critical';
-  requires_approval_before: 'commit' | 'deploy' | 'execute' | 'publish';
-  expires_at?: string;
-  task_id?: string;
+  diffPayload: DiffPayload;
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  requiresApprovalBefore: 'commit' | 'deploy' | 'execute' | 'publish';
+  expiresAt?: string;
+  taskId?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface DiffPayload {
   type: 'code_diff' | 'file_change' | 'data_change' | 'document' | 'other';
-  files_changed?: number;
+  filesChanged?: number;
   insertions?: number;
   deletions?: number;
   preview?: string;
-  full_diff_url?: string;
-  structured_data?: Record<string, unknown>;
+  fullDiffUrl?: string;
+  structuredData?: Record<string, unknown>;
 }
 
 export interface ApprovalDecision {
-  approval_id: string;
+  approvalId: string;
   decision: 'approved' | 'rejected' | 'modified';
-  decision_note?: string;
+  decisionNote?: string;
   modifications?: {
     instructions?: string;
-    revised_diff?: Record<string, unknown>;
+    revisedDiff?: Record<string, unknown>;
   };
 }
 
@@ -83,23 +84,23 @@ export interface MemoryEntry {
   key: string;
   value: Record<string, unknown>;
   confidence?: number;
-  source_approval_id?: string;
+  sourceApprovalId?: string;
 }
 
 export interface HeartbeatPayload {
-  surface_id: string;
+  surfaceId: string;
   status: 'active' | 'busy' | 'idle';
-  current_tasks: string[];
+  currentTasks: string[];
   load?: {
-    cpu_percent?: number;
-    memory_percent?: number;
-    queue_depth?: number;
+    cpuPercent?: number;
+    memoryPercent?: number;
+    queueDepth?: number;
   };
 }
 
 export interface ConnectorConfig {
-  supabaseUrl: string;
-  supabaseKey: string;
+  firebaseProjectId: string;
+  firebaseApiKey: string;
   agentName: string;
   surfaceId: string;
   heartbeatIntervalMs?: number;  // default: 60000
@@ -112,28 +113,45 @@ export interface ConnectorConfig {
 ```typescript
 // client.ts
 
-import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import { initializeApp, FirebaseApp } from 'firebase/app';
+import { getFirestore, Firestore, collection, doc, addDoc, getDocs, query, where, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { getAuth, Auth } from 'firebase/auth';
 import { ConnectorConfig, ApprovalRequest, ApprovalDecision, MemoryEntry } from './types';
 
+const CLOUD_FUNCTION_URL = process.env.CLOUD_FUNCTION_URL!;
+
 export class POCPClient {
-  private supabase: SupabaseClient;
-  private channel: RealtimeChannel;
+  private app: FirebaseApp;
+  private db: Firestore;
+  private auth: Auth;
   private config: ConnectorConfig;
   private heartbeatTimer: NodeJS.Timer | null = null;
+  private unsubscribeDecision: Unsubscribe | null = null;
 
   constructor(config: ConnectorConfig) {
     this.config = config;
-    this.supabase = createClient(config.supabaseUrl, config.supabaseKey);
-    this.channel = this.supabase.channel('agent-bus');
+    this.app = initializeApp({
+      projectId: config.firebaseProjectId,
+      apiKey: config.firebaseApiKey,
+    });
+    this.db = getFirestore(this.app);
+    this.auth = getAuth(this.app);
   }
 
   // --- Approval Methods ---
 
-  async submitApproval(request: ApprovalRequest): Promise<{ approval_id: string }> {
-    const { data, error } = await this.supabase.functions.invoke('submit-approval', {
-      body: { ...request, agent_name: this.config.agentName }
+  async submitApproval(request: ApprovalRequest): Promise<{ approvalId: string }> {
+    const idToken = await this.auth.currentUser?.getIdToken();
+    const response = await fetch(`${CLOUD_FUNCTION_URL}/submit-approval`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ...request, agentName: this.config.agentName }),
     });
-    if (error) throw new Error(`Submit approval failed: ${error.message}`);
+    if (!response.ok) throw new Error(`Submit approval failed: ${response.statusText}`);
+    const data = await response.json();
     return data;
   }
 
@@ -141,42 +159,52 @@ export class POCPClient {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Decision timeout')), timeoutMs);
 
-      this.channel
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'approval_queue',
-          filter: `id=eq.${approvalId}`
-        }, (payload) => {
-          if (payload.new.status !== 'pending') {
-            clearTimeout(timeout);
-            resolve({
-              approval_id: approvalId,
-              decision: payload.new.status,
-              decision_note: payload.new.decision_note,
-              modifications: payload.new.modifications
-            });
-          }
-        })
-        .subscribe();
+      const approvalRef = doc(this.db, 'approval_queue', approvalId);
+      this.unsubscribeDecision = onSnapshot(approvalRef, (snapshot) => {
+        const data = snapshot.data();
+        if (data && data.status !== 'pending') {
+          clearTimeout(timeout);
+          if (this.unsubscribeDecision) this.unsubscribeDecision();
+          resolve({
+            approvalId: approvalId,
+            decision: data.status,
+            decisionNote: data.decisionNote,
+            modifications: data.modifications,
+          });
+        }
+      });
     });
   }
 
   // --- Memory Methods ---
 
   async queryMemory(domain: string, keyPattern: string, limit = 10): Promise<MemoryEntry[]> {
-    const { data, error } = await this.supabase.functions.invoke('query-memory', {
-      body: { domain, key_pattern: keyPattern, limit }
+    const idToken = await this.auth.currentUser?.getIdToken();
+    const response = await fetch(`${CLOUD_FUNCTION_URL}/query-memory`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ domain, keyPattern, limit }),
     });
-    if (error) throw new Error(`Query memory failed: ${error.message}`);
+    if (!response.ok) throw new Error(`Query memory failed: ${response.statusText}`);
+    const data = await response.json();
     return data.entries;
   }
 
-  async writeMemory(entry: MemoryEntry): Promise<{ memory_id: string; conflict_detected: boolean }> {
-    const { data, error } = await this.supabase.functions.invoke('write-memory', {
-      body: { ...entry, surface_id: this.config.surfaceId }
+  async writeMemory(entry: MemoryEntry): Promise<{ memoryId: string; conflictDetected: boolean }> {
+    const idToken = await this.auth.currentUser?.getIdToken();
+    const response = await fetch(`${CLOUD_FUNCTION_URL}/write-memory`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ...entry, surfaceId: this.config.surfaceId }),
     });
-    if (error) throw new Error(`Write memory failed: ${error.message}`);
+    if (!response.ok) throw new Error(`Write memory failed: ${response.statusText}`);
+    const data = await response.json();
     return data;
   }
 
@@ -186,7 +214,15 @@ export class POCPClient {
     const interval = this.config.heartbeatIntervalMs || 60000;
     this.heartbeatTimer = setInterval(async () => {
       const payload = getStatus();
-      await this.supabase.functions.invoke('heartbeat', { body: payload });
+      const idToken = await this.auth.currentUser?.getIdToken();
+      await fetch(`${CLOUD_FUNCTION_URL}/heartbeat`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${idToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
     }, interval);
   }
 
@@ -196,36 +232,55 @@ export class POCPClient {
 
   // --- Resource Locking ---
 
-  async lockResource(resourcePath: string, durationMinutes = 60): Promise<{ lock_id: string }> {
-    const { data, error } = await this.supabase.functions.invoke('lock-resource', {
-      body: {
-        surface_id: this.config.surfaceId,
-        resource_type: 'file',
-        resource_path: resourcePath,
-        duration_minutes: durationMinutes
-      }
+  async lockResource(resourcePath: string, durationMinutes = 60): Promise<{ lockId: string }> {
+    const idToken = await this.auth.currentUser?.getIdToken();
+    const response = await fetch(`${CLOUD_FUNCTION_URL}/lock-resource`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        surfaceId: this.config.surfaceId,
+        resourceType: 'file',
+        resourcePath: resourcePath,
+        durationMinutes: durationMinutes,
+      }),
     });
-    if (error) throw new Error(`Lock failed: ${error.message}`);
+    if (!response.ok) throw new Error(`Lock failed: ${response.statusText}`);
+    const data = await response.json();
     return data;
   }
 
   async unlockResource(lockId: string): Promise<void> {
-    await this.supabase.functions.invoke('unlock-resource', {
-      body: { lock_id: lockId, surface_id: this.config.surfaceId }
+    const idToken = await this.auth.currentUser?.getIdToken();
+    await fetch(`${CLOUD_FUNCTION_URL}/unlock-resource`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ lockId, surfaceId: this.config.surfaceId }),
     });
   }
 
   // --- Task Methods ---
 
   async completeTask(taskId: string, outcome: string, output: Record<string, unknown>, durationMs: number): Promise<void> {
-    await this.supabase.functions.invoke('complete-task', {
-      body: {
-        task_id: taskId,
-        surface_id: this.config.surfaceId,
+    const idToken = await this.auth.currentUser?.getIdToken();
+    await fetch(`${CLOUD_FUNCTION_URL}/complete-task`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        taskId,
+        surfaceId: this.config.surfaceId,
         outcome,
         output,
-        duration_ms: durationMs
-      }
+        durationMs,
+      }),
     });
   }
 
@@ -233,7 +288,7 @@ export class POCPClient {
 
   async disconnect(): Promise<void> {
     this.stopHeartbeat();
-    await this.supabase.removeChannel(this.channel);
+    if (this.unsubscribeDecision) this.unsubscribeDecision();
   }
 }
 ```
@@ -266,10 +321,10 @@ Claude Code Session
 │   ├── post-task.sh         (submit approval, wait for decision)
 │   └── heartbeat.sh         (background ping)
 ├── pocp/
-│   ├── config.json          (Supabase URL, key, surface ID)
+│   ├── config.json          (Firebase project ID, API key, surface ID)
 │   ├── connector.ts         (Node.js connector logic)
 │   ├── risk-assessor.ts     (auto-classify risk from git diff)
-│   └── diff-builder.ts      (build diff_payload from git state)
+│   └── diff-builder.ts      (build diffPayload from git state)
 └── CLAUDE.md                (includes POCP context instructions)
 ```
 
@@ -321,7 +376,7 @@ RESULT=$(node .claude/pocp/connector.ts submit-approval \
   --deletions "$DELETIONS" \
   --preview "$(git diff --staged | head -200)")
 
-APPROVAL_ID=$(echo $RESULT | jq -r '.approval_id')
+APPROVAL_ID=$(echo $RESULT | jq -r '.approvalId')
 
 if [ "$RISK" = "low" ]; then
   echo "Low risk — auto-approved"
@@ -384,7 +439,7 @@ export function assessRisk(diff: {
 
 ### 4.1 Architecture
 
-Cowork runs as a desktop app with access to the local file system and a Linux VM. The connector integrates via session-level JavaScript that calls Supabase directly.
+Cowork runs as a desktop app with access to the local file system and a Linux VM. The connector integrates via session-level JavaScript that calls Firebase directly.
 
 ```
 Cowork Session
@@ -396,7 +451,7 @@ Cowork Session
        └── Session end     → Stop heartbeat, deregister
 ```
 
-### 3.2 Integration Pattern
+### 4.2 Integration Pattern
 
 Since Cowork executes JavaScript in a VM, the connector runs as a Node.js module:
 
@@ -406,17 +461,17 @@ Since Cowork executes JavaScript in a VM, the connector runs as a Node.js module
 import { POCPClient } from 'pocp-connector-sdk';
 
 const client = new POCPClient({
-  supabaseUrl: process.env.SUPABASE_URL!,
-  supabaseKey: process.env.SUPABASE_ANON_KEY!,
+  firebaseProjectId: process.env.FIREBASE_PROJECT_ID!,
+  firebaseApiKey: process.env.FIREBASE_API_KEY!,
   agentName: 'cowork-desktop',
   surfaceId: process.env.COWORK_SURFACE_ID!,
 });
 
 // Start heartbeat on session init
 client.startHeartbeat(() => ({
-  surface_id: process.env.COWORK_SURFACE_ID!,
+  surfaceId: process.env.COWORK_SURFACE_ID!,
   status: 'active',
-  current_tasks: getCurrentTaskIds(),
+  currentTasks: getCurrentTaskIds(),
 }));
 
 // Before creating/modifying files, submit approval
@@ -429,20 +484,20 @@ export async function approveFileChange(
 
   const riskLevel = changeType === 'delete' ? 'high' : 'medium';
 
-  const { approval_id } = await client.submitApproval({
-    agent_name: 'cowork-desktop',
+  const { approvalId } = await client.submitApproval({
+    agentName: 'cowork-desktop',
     title,
     description,
-    diff_payload: {
+    diffPayload: {
       type: 'file_change',
-      files_changed: filePaths.length,
-      structured_data: { filePaths, changeType }
+      filesChanged: filePaths.length,
+      structuredData: { filePaths, changeType }
     },
-    risk_level: riskLevel,
-    requires_approval_before: 'execute'
+    riskLevel: riskLevel,
+    requiresApprovalBefore: 'execute'
   });
 
-  const decision = await client.waitForDecision(approval_id);
+  const decision = await client.waitForDecision(approvalId);
   return decision.decision === 'approved';
 }
 ```
@@ -467,7 +522,7 @@ Before modifying files:
 
 ### 5.1 Architecture
 
-Codex operates as a cloud agent that creates GitHub PRs. The connector is a Supabase Edge Function triggered by GitHub webhooks.
+Codex operates as a cloud agent that creates GitHub PRs. The connector is a Cloud Function triggered by GitHub webhooks.
 
 ```
 Codex creates PR on GitHub
@@ -476,43 +531,44 @@ Codex creates PR on GitHub
 GitHub webhook fires (PR opened)
        │
        ▼
-Supabase Edge Function: handle-codex-pr
+Cloud Function: handleCodexPr
        │
        ├── Extract PR metadata (title, body, diff stats)
        ├── Assess risk level
-       ├── Insert into approval_queue
+       ├── Insert into approval_queue collection
        │
        ▼
 User approves on mobile
        │
        ▼
-Edge Function: relay-codex-decision
+Cloud Function: relayCodexDecision (Firestore trigger)
        │
        ├── If approved → Merge PR via GitHub API
        ├── If rejected → Close PR with comment
        └── If modified → Add review comment with instructions
 ```
 
-### 5.2 Edge Function: handle-codex-pr
+### 5.2 Cloud Function: handleCodexPr
 
 ```typescript
-// supabase/functions/handle-codex-pr/index.ts
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
+// functions/src/handleCodexPr.ts
+import { onRequest } from 'firebase-functions/v2/https';
+import { getFirestore } from 'firebase-admin/firestore';
+import { initializeApp } from 'firebase-admin/app';
 
-Deno.serve(async (req: Request) => {
-  const payload = await req.json();
+initializeApp();
+const db = getFirestore();
+
+export const handleCodexPr = onRequest(async (req, res) => {
+  const payload = req.body;
 
   // Only handle PR opened events
   if (payload.action !== 'opened') {
-    return new Response('ignored', { status: 200 });
+    res.status(200).send('ignored');
+    return;
   }
 
   const pr = payload.pull_request;
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  );
 
   // Assess risk
   let riskLevel = 'medium';
@@ -523,70 +579,69 @@ Deno.serve(async (req: Request) => {
   }
 
   // Get codex surface ID
-  const { data: surface } = await supabase
-    .from('surfaces')
-    .select('id')
-    .eq('name', 'openai-codex')
-    .single();
+  const surfaceSnapshot = await db.collection('surfaces')
+    .where('name', '==', 'openai-codex')
+    .limit(1)
+    .get();
+
+  const surface = surfaceSnapshot.docs[0];
 
   // Insert approval
-  const { data: approval, error } = await supabase
-    .from('approval_queue')
-    .insert({
-      surface_id: surface.id,
-      agent_name: 'openai-codex',
-      title: `PR #${pr.number}: ${pr.title}`,
-      description: pr.body || 'No description provided',
-      diff_payload: {
-        type: 'code_diff',
-        files_changed: pr.changed_files,
-        insertions: pr.additions,
-        deletions: pr.deletions,
-        full_diff_url: pr.diff_url,
-        structured_data: {
-          pr_number: pr.number,
-          pr_url: pr.html_url,
-          branch: pr.head.ref,
-          repo: pr.head.repo.full_name
-        }
-      },
-      risk_level: riskLevel,
-      expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() // 4 hours
-    })
-    .select()
-    .single();
-
-  return new Response(JSON.stringify({ approval_id: approval.id }), {
-    headers: { 'Content-Type': 'application/json' }
+  const approvalRef = await db.collection('approval_queue').add({
+    surfaceId: surface.id,
+    agentName: 'openai-codex',
+    title: `PR #${pr.number}: ${pr.title}`,
+    description: pr.body || 'No description provided',
+    diffPayload: {
+      type: 'code_diff',
+      filesChanged: pr.changed_files,
+      insertions: pr.additions,
+      deletions: pr.deletions,
+      fullDiffUrl: pr.diff_url,
+      structuredData: {
+        prNumber: pr.number,
+        prUrl: pr.html_url,
+        branch: pr.head.ref,
+        repo: pr.head.repo.full_name
+      }
+    },
+    riskLevel: riskLevel,
+    status: 'pending',
+    requestedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() // 4 hours
   });
+
+  res.status(201).json({ approvalId: approvalRef.id });
 });
 ```
 
 ### 5.3 Decision Relay
 
-When the user approves/rejects on mobile, a database trigger fires:
+When the user approves/rejects on mobile, a Firestore trigger fires:
 
-```sql
--- Trigger function: relay Codex decisions to GitHub
-CREATE OR REPLACE FUNCTION relay_codex_decision()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF NEW.agent_name = 'openai-codex' AND NEW.status != 'pending' THEN
-    -- Call Edge Function to interact with GitHub API
-    PERFORM net.http_post(
-      url := current_setting('app.supabase_url') || '/functions/v1/relay-codex-decision',
-      body := jsonb_build_object(
-        'approval_id', NEW.id,
-        'decision', NEW.status,
-        'decision_note', NEW.decision_note,
-        'pr_number', NEW.diff_payload->'structured_data'->>'pr_number',
-        'repo', NEW.diff_payload->'structured_data'->>'repo'
-      )
-    );
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+```typescript
+// functions/src/relayCodexDecision.ts
+import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
+
+export const relayCodexDecision = onDocumentUpdated(
+  'approval_queue/{approvalId}',
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+
+    if (!before || !after) return;
+
+    // Only process when status changes from pending
+    if (before.status === 'pending' && after.status !== 'pending' && after.agentName === 'openai-codex') {
+      const prNumber = after.diffPayload?.structuredData?.prNumber;
+      const repo = after.diffPayload?.structuredData?.repo;
+
+      // Call GitHub API based on decision
+      // (Implementation: use Octokit or fetch to merge/close/comment on PR)
+      console.log(`Relaying decision "${after.status}" for PR #${prNumber} in ${repo}`);
+    }
+  }
+);
 ```
 
 ---
@@ -611,7 +666,7 @@ User clicks button
        │
        ├── Extension extracts conversation context
        ├── User selects: Memory Write | Approval Request | Task Note
-       ├── Posts to Supabase Edge Function
+       ├── Posts to Cloud Function
        └── Confirmation toast in browser
 ```
 
@@ -623,7 +678,7 @@ chatgpt-pocp-bridge/
 ├── content.js              (injected into chatgpt.com)
 ├── popup.html              (extension popup for settings)
 ├── popup.js
-├── background.js           (handles Supabase communication)
+├── background.js           (handles Firebase communication)
 ├── styles.css              (floating button + modal styles)
 └── icons/
     ├── icon16.png
@@ -637,8 +692,8 @@ chatgpt-pocp-bridge/
 // content.js — injected into chatgpt.com
 
 (function() {
-  const SUPABASE_URL = ''; // loaded from extension storage
-  const SUPABASE_KEY = ''; // loaded from extension storage
+  const CLOUD_FUNCTION_URL = ''; // loaded from extension storage
+  const FIREBASE_ID_TOKEN = ''; // loaded from extension storage
 
   // Watch for new ChatGPT responses
   const observer = new MutationObserver((mutations) => {
@@ -708,22 +763,22 @@ chatgpt-pocp-bridge/
 ### 6.4 Background Script
 
 ```javascript
-// background.js — handles Supabase communication
+// background.js — handles Firebase communication
 
 chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
   if (message.type !== 'pocp-send') return;
 
-  const config = await chrome.storage.sync.get(['supabaseUrl', 'supabaseKey', 'surfaceId']);
+  const config = await chrome.storage.sync.get(['cloudFunctionUrl', 'firebaseIdToken', 'surfaceId']);
 
   if (message.action === 'memory') {
-    await fetch(`${config.supabaseUrl}/functions/v1/write-memory`, {
+    await fetch(`${config.cloudFunctionUrl}/write-memory`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${config.supabaseKey}`,
+        'Authorization': `Bearer ${config.firebaseIdToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        surface_id: config.surfaceId,
+        surfaceId: config.surfaceId,
         domain: message.domain,
         key: message.title,
         value: { content: message.content, source: 'chatgpt' },
@@ -731,22 +786,22 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       })
     });
   } else if (message.action === 'approval') {
-    await fetch(`${config.supabaseUrl}/functions/v1/submit-approval`, {
+    await fetch(`${config.cloudFunctionUrl}/submit-approval`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${config.supabaseKey}`,
+        'Authorization': `Bearer ${config.firebaseIdToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        agent_name: 'chatgpt',
+        agentName: 'chatgpt',
         title: message.title,
         description: message.content.substring(0, 5000),
-        diff_payload: {
+        diffPayload: {
           type: 'document',
-          structured_data: { full_content: message.content }
+          structuredData: { fullContent: message.content }
         },
-        risk_level: 'medium',
-        requires_approval_before: 'execute'
+        riskLevel: 'medium',
+        requiresApprovalBefore: 'execute'
       })
     });
   }
@@ -824,26 +879,26 @@ export class FileWatcher {
     try {
       const lock = await this.client.lockResource(filePath, 30);
 
-      const { approval_id } = await this.client.submitApproval({
-        agent_name: 'antigravity-ide',
+      const { approvalId } = await this.client.submitApproval({
+        agentName: 'antigravity-ide',
         title: `Modified: ${filePath.split('/').pop()}`,
         description: `Changed ${linesChanged} lines in ${filePath}`,
-        diff_payload: {
+        diffPayload: {
           type: 'code_diff',
-          files_changed: 1,
+          filesChanged: 1,
           insertions: changes.split('\n').filter(l => l.startsWith('+')).length,
           deletions: changes.split('\n').filter(l => l.startsWith('-')).length,
           preview: changes.substring(0, 2000)
         },
-        risk_level: this.assessRisk(filePath, linesChanged),
-        requires_approval_before: 'commit'
+        riskLevel: this.assessRisk(filePath, linesChanged),
+        requiresApprovalBefore: 'commit'
       });
 
       // Update snapshot
       this.fileSnapshots.set(filePath, newContent);
 
       // Release lock after approval submitted
-      await this.client.unlockResource(lock.lock_id);
+      await this.client.unlockResource(lock.lockId);
     } catch (error) {
       if (error.message.includes('already_locked')) {
         // Show notification: file is being edited by another agent
@@ -904,7 +959,7 @@ export class StatusBar {
 
 ### 8.1 Architecture
 
-Excel Claude runs inside Microsoft Excel using Office Scripts or VBA. The connector posts structured data changes to Supabase when significant spreadsheet modifications occur.
+Excel Claude runs inside Microsoft Excel using Office Scripts or VBA. The connector posts structured data changes only after an external helper-auth flow is proven in the target environment.
 
 ```
 Excel + Claude in-app
@@ -920,8 +975,8 @@ Excel + Claude in-app
 ```typescript
 // ExcelPOCPConnector.ts (Office Script)
 
-const SUPABASE_URL = "https://<project>.supabase.co";
-const SUPABASE_KEY = "<anon-key>";
+const CLOUD_FUNCTION_URL = "https://<region>-<project>.cloudfunctions.net";
+const FIREBASE_ID_TOKEN = "<id-token>";
 const SURFACE_ID = "<excel-surface-uuid>";
 
 async function submitApproval(
@@ -934,41 +989,41 @@ async function submitApproval(
   const values = usedRange.getValues();
 
   const payload = {
-    agent_name: "excel-claude",
+    agentName: "excel-claude",
     title: title,
     description: `Changes to sheet "${sheet.getName()}" in range ${usedRange.getAddress()}`,
-    diff_payload: {
+    diffPayload: {
       type: "data_change",
-      structured_data: {
-        sheet_name: sheet.getName(),
+      structuredData: {
+        sheetName: sheet.getName(),
         range: usedRange.getAddress(),
-        row_count: values.length,
-        col_count: values[0]?.length || 0,
+        rowCount: values.length,
+        colCount: values[0]?.length || 0,
         summary: buildChangeSummary(values)
       }
     },
-    risk_level: riskLevel,
-    requires_approval_before: "execute"
+    riskLevel: riskLevel,
+    requiresApprovalBefore: "execute"
   };
 
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/submit-approval`, {
+  const response = await fetch(`${CLOUD_FUNCTION_URL}/submit-approval`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Authorization": `Bearer ${FIREBASE_ID_TOKEN}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(payload)
   });
 
   const result = await response.json();
-  console.log(`Approval submitted: ${result.approval_id}`);
+  console.log(`Approval submitted: ${result.approvalId}`);
 }
 
 function buildChangeSummary(values: (string | number | boolean)[][]): string {
   const rows = values.length;
   const cols = values[0]?.length || 0;
   const numericCells = values.flat().filter(v => typeof v === 'number').length;
-  return `${rows} rows × ${cols} columns, ${numericCells} numeric cells`;
+  return `${rows} rows x ${cols} columns, ${numericCells} numeric cells`;
 }
 
 // Main entry point — called from ribbon button or macro
@@ -1022,17 +1077,17 @@ Every connector must pass these tests before deployment:
 
 | Test | Description | Pass Criteria |
 |---|---|---|
-| Submit approval | Post a valid approval request | Returns 201 with approval_id |
+| Submit approval | Post a valid approval request | Returns 201 with approvalId |
 | Receive decision | Listen for and process an approval decision | Correctly handles approve/reject/modify |
 | Memory read | Query memory for existing entries | Returns relevant entries with confidence scores |
-| Memory write | Write a new memory entry | Entry appears in memory table |
+| Memory write | Write a new memory entry | Entry appears in memory collection |
 | Heartbeat | Send heartbeat and receive acknowledgment | 200 OK, pending assignments returned |
-| Lock acquire | Request a file lock | Returns lock_id |
+| Lock acquire | Request a file lock | Returns lockId |
 | Lock conflict | Request a lock on an already-locked resource | Returns 423 with lock details |
 | Lock release | Release a held lock | Lock removed from system |
 | Risk assessment | Classify changes into correct risk level | Matches expected risk for test scenarios |
-| Offline recovery | Handle Supabase downtime gracefully | Queues actions locally, syncs on reconnect |
-| Auth failure | Handle expired or invalid JWT | Refreshes token or surfaces error |
+| Offline recovery | Handle Firebase downtime gracefully | Queues actions locally, syncs on reconnect |
+| Auth failure | Handle expired or invalid token | Refreshes token or surfaces error |
 
 ### 9.2 Integration Test Scenario
 
@@ -1056,9 +1111,9 @@ End-to-end test across all six connectors:
 ### 10.1 Environment Variables (All Connectors)
 
 ```bash
-SUPABASE_URL=https://<project>.supabase.co
-SUPABASE_ANON_KEY=<anon-key>
-SUPABASE_SERVICE_ROLE_KEY=<service-role-key>  # Edge Functions only
+FIREBASE_PROJECT_ID=<project-id>
+FIREBASE_API_KEY=<api-key>
+CLOUD_FUNCTION_URL=https://<region>-<project-id>.cloudfunctions.net
 POCP_SURFACE_ID=<uuid>                        # Unique per connector
 POCP_AGENT_NAME=<string>                      # Matches agent registry
 POCP_HEARTBEAT_INTERVAL_MS=60000
@@ -1068,9 +1123,17 @@ POCP_AUTO_APPROVE_LOW_RISK=false
 ### 10.2 Setup Checklist Per Connector
 
 - [ ] Register agent via `/register-agent`
-- [ ] Store returned `surface_id` in config
-- [ ] Verify heartbeat reaches Supabase
+- [ ] Store returned `surfaceId` in config
+- [ ] Verify heartbeat reaches Firestore
 - [ ] Submit a test approval and verify it appears in queue
 - [ ] Approve the test from mobile and verify agent receives decision
 - [ ] Write a test memory entry and verify it's queryable
-- [ ] Run full integration test (§9.2)
+- [ ] Run full integration test (SS9.2)
+
+## 11. Contract Decisions
+
+- HTTP payloads use camelCase field names.
+- Firestore collections use snake_case names, including `approval_queue`.
+- User-surface connectors authenticate with Firebase ID tokens.
+- Provider callbacks such as GitHub webhooks use dedicated public ingress with signature verification and then write through the Admin SDK.
+- ChatGPT and Excel are optional adapters until their runtime constraints are validated; they are not on the critical path for proving the platform.

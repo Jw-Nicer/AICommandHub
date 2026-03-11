@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner() {
+      return request.auth.uid == resource.data.ownerId;
+    }
+
+    function isNewOwner() {
+      return request.auth.uid == request.resource.data.ownerId;
+    }
+
+    // Surfaces — user can only access their own
+    match /surfaces/{surfaceId} {
+      allow read, update, delete: if isAuthenticated() && isOwner();
+      allow create: if isAuthenticated() && isNewOwner();
+    }
+
+    // Approval queue — user can only access their own approvals
+    match /approval_queue/{approvalId} {
+      allow read: if isAuthenticated() && isOwner();
+      allow create: if isAuthenticated() && isNewOwner();
+      allow update: if isAuthenticated() && isOwner()
+        && request.resource.data.agentName == resource.data.agentName
+        && request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if false;
+    }
+
+    // Memory — user can only access their own memory entries
+    match /memory/{memoryId} {
+      allow read, update, delete: if isAuthenticated() && isOwner();
+      allow create: if isAuthenticated() && isNewOwner();
+    }
+
+    // Execution log — user can only read their own logs (immutable)
+    match /execution_log/{logId} {
+      allow read: if isAuthenticated() && isOwner();
+      allow create: if isAuthenticated() && isNewOwner();
+      allow update, delete: if false;
+    }
+
+    // Tasks — user can only access their own tasks
+    match /tasks/{taskId} {
+      allow read, update, delete: if isAuthenticated() && isOwner();
+      allow create: if isAuthenticated() && isNewOwner();
+    }
+
+    // Locks — user can read all locks, but only create/delete own
+    match /locks/{lockId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isNewOwner();
+      allow update: if false;
+      allow delete: if isAuthenticated() && isOwner();
+    }
+
+    // Devices — user can only access their own devices
+    match /devices/{deviceId} {
+      allow read, update, delete: if isAuthenticated() && isOwner();
+      allow create: if isAuthenticated() && isNewOwner();
+    }
+
+    // User settings — document ID is the user's UID
+    match /user_settings/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Auto-approve rules — user can only access their own
+    match /auto_approve_rules/{ruleId} {
+      allow read, update: if isAuthenticated() && isOwner();
+      allow create: if isAuthenticated() && isNewOwner();
+      allow delete: if isAuthenticated() && isOwner();
+    }
+
+    // Digests — user can only read their own (created by Cloud Functions)
+    match /digests/{digestId} {
+      allow read: if isAuthenticated() && isOwner();
+      allow create, update, delete: if false;
+    }
+  }
+}

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 320px;
+      padding: 16px;
+      font-family: -apple-system, system-ui, sans-serif;
+      background: #111827;
+      color: #F9FAFB;
+      margin: 0;
+    }
+    h1 {
+      font-size: 16px;
+      margin: 0 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h1 span { color: #3B82F6; }
+    label {
+      display: block;
+      font-size: 11px;
+      color: #9CA3AF;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 12px 0 4px;
+      font-weight: 600;
+    }
+    input {
+      width: 100%;
+      padding: 8px 10px;
+      font-size: 13px;
+      background: #1F2937;
+      border: 1px solid #374151;
+      border-radius: 6px;
+      color: #F9FAFB;
+      outline: none;
+      box-sizing: border-box;
+    }
+    input:focus { border-color: #3B82F6; }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      padding: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      background: #3B82F6;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover { opacity: 0.9; }
+    #status {
+      margin-top: 12px;
+      font-size: 12px;
+      text-align: center;
+    }
+    .connected { color: #10B981; }
+    .error { color: #EF4444; }
+  </style>
+</head>
+<body>
+  <h1><span>POCP</span> ChatGPT Bridge</h1>
+
+  <label>Cloud Function URL</label>
+  <input type="text" id="cloudFunctionUrl" placeholder="https://region-project.cloudfunctions.net">
+
+  <label>Firebase Auth Token</label>
+  <input type="password" id="authToken" placeholder="Bearer token from Firebase Auth">
+
+  <label>Surface ID (optional)</label>
+  <input type="text" id="surfaceId" placeholder="From /register-agent response">
+
+  <button id="save">Save Configuration</button>
+
+  <div id="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
