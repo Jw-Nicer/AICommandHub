@@ -1,0 +1,17 @@
+{
+  "name": "pocp-connector-sdk",
+  "version": "0.1.0",
+  "description": "SDK for connecting execution surfaces to the POCP control plane",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "firebase": "^11.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

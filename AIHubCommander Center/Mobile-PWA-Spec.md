@@ -1,8 +1,9 @@
 # Mobile-PWA-Spec.md — Approval Surface UI Specification
 
-**Version:** 1.0
+**Version:** 2.0
 **Author:** Johnwil
 **Date:** 2026-03-10
+**Platform:** Firebase / Google Cloud
 **Parent Document:** [Claude.md](./Claude.md)
 
 ---
@@ -11,7 +12,7 @@
 
 The mobile PWA is the single approval surface for the Parallel Operations Control Plane (POCP). It is designed for one-handed phone operation, instant load times, and offline resilience. Everything a user needs to govern six parallel AI agents lives in this app.
 
-**Tech Stack:** Next.js 14 (App Router) + Supabase JS Client + Tailwind CSS + PWA manifest
+**Tech Stack:** Next.js 14 (App Router) + Firebase JS SDK (Auth + Firestore + FCM) + Tailwind CSS + PWA manifest
 
 ---
 
@@ -316,7 +317,7 @@ Fixed at the bottom of every screen. Three primary tabs plus overflow.
 
 ### 4.2 Pull-to-Refresh
 
-All list views support pull-to-refresh. Also auto-refresh via Supabase Realtime subscriptions.
+All list views support pull-to-refresh. Also auto-refresh via Firestore Realtime Listeners (onSnapshot).
 
 ### 4.3 Deep Links
 
@@ -484,10 +485,10 @@ mobile-pwa/
 │   ├── ConflictCompare.tsx
 │   └── OfflineBanner.tsx
 ├── lib/
-│   ├── supabase.ts             (client init + auth)
-│   ├── realtime.ts             (subscription hooks)
+│   ├── firebase.ts             (client init + auth)
+│   ├── realtime.ts             (Firestore onSnapshot hooks)
 │   ├── offline.ts              (IndexedDB + sync logic)
-│   └── notifications.ts       (push notification setup)
+│   └── notifications.ts       (Firebase Cloud Messaging (FCM) push notification setup)
 ├── public/
 │   ├── manifest.json           (PWA manifest)
 │   ├── sw.js                   (service worker)

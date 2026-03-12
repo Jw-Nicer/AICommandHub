@@ -1,0 +1,18 @@
+{
+  "name": "antigravity-pocp-plugin",
+  "version": "0.1.0",
+  "description": "POCP integration plugin for Antigravity IDE",
+  "main": "dist/extension.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "firebase": "^11.4.0",
+    "diff": "^5.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/diff": "^5.2.0"
+  }
+}
